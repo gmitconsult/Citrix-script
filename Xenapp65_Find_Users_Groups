@@ -1,0 +1,39 @@
+#Script RAPIDE permettant de lister les applications XenApp 6.5 avec les groupes ou utilisateurs
+#
+#GMC le 29/10/2018
+#
+add-pssnapin Citrix.* 
+
+# Create variables
+$MyLine = [string]
+$NomFichierACreer = [string]
+
+# Nom du fichier résultat
+$NomFichierACreer = "ListeApplicationUtilisateurCitrixXA65.txt"
+
+# Emplacement du Fichier résultat 
+$EmplacementFichier = "E:\Powershell_Citrix\$NomFichierACreer"
+
+#Création du fichier résultat vierge pour partir d'un contenu vide
+$MonFichier = New-Item -type file $EmplacementFichier -Force
+
+#Ajout ligne en-tete du fichier résultat pour le tri et le filtrage
+$MyLine="Nom Application Citrix,Actif,Compte,Type"
+Add-Content $MonFichier $MyLine
+
+#Recherche des applications Citrix
+$xaapplist = get-xaapplication
+
+foreach ($application in $xaapplist) {
+	$appreport = get-xaapplicationreport -BrowserName $application.BrowserName
+	
+	
+	$DroitsDacces = $appreport.accounts
+	
+    #Inscrire dans le fichier résultat : Nom Application Citix + Actif / Inactif + Nom Compte Citrix + Type (User / Group)
+	foreach ($unGroupeOuUser in $DroitsDacces) {
+		$MyLine = $($appreport.BrowserName) +","+ $($appreport.enabled)+","+ $($unGroupeOuUser.AccountName) +","+  $($unGroupeOuUser.AccountType)
+        Add-Content $MonFichier $MyLine
+
+	}
+}
