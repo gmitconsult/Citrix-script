@@ -1,0 +1,156 @@
+<#
+#Validé par Gérard MOULLEC 03/2019
+#13/03/2019 - Ajout Import-Module Citrix.GroupPolicy.Commands.psm1
+#le résultat de l'export des Stratégies est déposé dans un fichier Word sous C:\temp
+#L'outil scout de chez citrix doit être installé avant execution du script
+#
+.NAME:
+Get-XAPoliciesReport.ps1
+.VERSION:
+1.0.1 - 15/02/2017 - initial script
+1.2.0 - 17/02/2017 - final version
+#
+.DESCRIPTION
+This script generates a configuration report for Citrix policies defined in Citrix XenApp 6.5 environment in Word document format.
+.PARAMETER
+.REQUIREMENTS
+Citrix XenApp Commands/SDK has to be installed on the server. Might require Citrix Scout installation to get Citrix.GroupPolicy.Commands.psm1
+.NOTES
+This script was tested on Windows Server 2008 R2/PowerShell 2.0 in Citrix XenApp 6.5 farm. Not checked in XenApp/XenDesktop 7.x
+.AUTHOR
+Pawel Serwan, https://pawelserwan.wordpress.com/
+#>
+#Load XenApp Commands snapins (if necessary)
+if ( (Get-PSSnapin -Name Citrix.Common.GroupPolicy -ErrorAction SilentlyContinue) -eq $null ) { Add-PSSnapin Citrix.Common.GroupPolicy }
+if ( (Get-PSSnapin -Name Citrix.Common.Commands -ErrorAction SilentlyContinue) -eq $null ) { Add-PSSnapin Citrix.Common.Commands }
+if ( (Get-PSSnapin -Name Citrix.XenApp.Commands -ErrorAction SilentlyContinue) -eq $null ) { Add-PSSnapin Citrix.XenApp.Commands }
+ 
+
+#Import PowerShell module from Scout folder - required to retrieve list of Citrix policies - Please provide path!
+Import-Module -Name "E:\Citrix\Xenapp\Gerard\Scout\Current\Utilities\Citrix.GroupPolicy.Commands.psm1"
+ 
+#Initalize farm
+$farm = Get-XAFarm
+ 
+#Output list of Current Policies and prompt for one to create a document and backup
+$objCtxPolicies = Get-CtxGroupPolicyConfiguration
+ 
+#Set variables
+$docpath = "C:\temp"
+$ComputerName = $env:computername
+$username = $env:username
+$date = Get-Date –format dd-MM-yyyy
+ 
+#Test path & create if not present
+if (!(Test-path -path $docpath)) { new-item $docpath -type directory | out-null }
+ 
+# Create new Word document
+[ref]$SaveFormat = "microsoft.office.interop.word.WdSaveFormat" -as [type]
+$objWord = New-Object -COMObject Word.Application
+$objWord.Visible = $True
+$objDocument = $objWord.Documents.Add()
+$objSelection = $objWord.selection
+$objSelection.WholeStory
+$objSelection.Style = 'Title'
+$objSelection.TypeText("Configuration Report for Citrix policies in Citrix XenApp $($farm.ServerVersion) farm: $($farm.FarmName)")
+$objSelection.TypeParagraph()
+$objSelection.Style = 'Heading 2'
+$objSelection.typeText("Report compiled on $date by $username on computer: $ComputerName")
+ 
+$objDocument.saveas([ref] $docpath, [ref]$saveFormat::wdFormatDocument)
+ 
+foreach ($objCtxPolicy in $objCtxPolicies)
+{
+    $arrayCtxPolicy = @()
+    #write Citrix Policy details into WORD document
+    $objSelection.TypeParagraph()
+    $objSelection.Style = 'Heading 1'
+    $objSelection.typeText("Configuration Report for Citrix policy: $($objCTXpolicy.PolicyName)/$($objCTXpolicy.Type)")
+    $objSelection.TypeParagraph()
+ 
+    #Going through all enabled settings
+    foreach ($objCtxPolicyProperty in @($objCtxPolicy | Get-Member -Type NoteProperty | Select -Expand Name))
+    {
+        $config = $objCtxPolicy.$objCtxPolicyProperty
+ 
+        if ($config.State -ne "NotConfigured")
+        {
+            $CTXconfPolicy = New-Object PSObject
+            if (Get-Member -InputObject $config -Name Value)
+            {
+                $CtxConfPolicy | Add-Member -MemberType NoteProperty -Name ConfiguredSetting -Value "$($config.Path)" -PassThru | Add-Member -MemberType NoteProperty -Name ConfiguredValue "$($config.Value)" -PassThru
+            }
+            else
+            {
+                $CtxConfPolicy | Add-Member -MemberType NoteProperty -Name ConfiguredSetting -Value "$($config.Path)" -PassThru | Add-Member -MemberType NoteProperty -Name ConfiguredValue "$($config.State)" -PassThru
+            }
+            #removing empty spaces and blank entries
+            if ($CTXconfPolicy.ConfiguredSetting -ne "")
+            {
+                $arrayCtxPolicy += $CtxConfPolicy
+            }
+ 
+        }
+    }
+    $outpol = $arrayCTXpolicy
+    #adding table with configuration of Citrix policy into Word document
+    $objTableColumns = $CTXconfPolicy | gm -MemberType NoteProperty | select name
+    $objNumberOfColumns = $objTableColumns.Count
+    $objNumberOfRows = $arrayCtxPolicy.Count + 1
+    $x=2
+    #$objRange = $objDocument.Range()
+ 
+    $Table = $objDocument.Tables.Add($objSelection.Range,$objNumberOfRows,$objNumberOfColumns, [Microsoft.Office.Interop.Word.WdDefaultTableBehavior]::wdWord9TableBehavior,
+    [Microsoft.Office.Interop.Word.WdAutoFitBehavior]::wdAutoFitContent)
+ 
+    $Table.Style = "Medium Shading 1 - Accent 1"
+ 
+     #Putting headers
+    for ($i=1; $i -le ($objNumberOfColumns); $i++)
+    {
+        $Table.cell(1,$i).range.Bold=1
+        $Table.Cell(1,$i).Range.Text = "$($objTableColumns[$i-1].name)"
+    }
+ 
+    for ($a=2; $a -le $objNumberOfRows; $a++)
+    {
+        for ($b=1; $b -le $objNumberOfColumns; $b++)
+        {
+            $Table.Cell($a,$b).Range.Text = "$($arrayCtxPolicy[$a-2].$($objTableColumns[$b-1].name))"
+        }
+    }
+    #closing table to start writing in lines now
+    $objSelection.Start = $objDocument.Content.End
+    $objSelection.TypeParagraph()
+ 
+    $policyfilter = Get-CtxGroupPolicyFilter -PolicyName $objCtxPolicy.PolicyName
+    if ($policyfilter -ne $null)
+    {
+        $objSelection.Font.Bold = $True
+        $objSelection.TypeText($policyfilter.PolicyName + " policy applied to:")
+        $objSelection.Font.Bold = $False
+ 
+        $outpolfilter = $policyfilter | Out-String
+        $objSelection.TypeText("" + $outpolfilter)
+     }
+     else
+     {
+        $objSelection.Font.Bold = $True
+        $objSelection.TypeText("Citrix Policy Filter: " + $objCtxPolicy.PolicyName +  " doesn't have any policy filter applied.")
+        $objSelection.Font.Bold = $False
+        $objSelection.TypeParagraph()
+     }
+}
+ 
+$doctitle = "Citrix Policies - Configuration Report for Citrix farm - $($farm.FarmName)"
+if (Test-Path -Path "$docpath\$doctitle.doc")
+{
+    $savepath = "$docpath\$doctitle" + "_$date" +".doc"
+}
+else
+{
+    $savepath = "$docpath\$doctitle.doc"
+}
+$objDocument.SaveAs([ref]$savepath,[ref]$SaveFormat::wdFormatDocument)
+$objDocument.Close()
+$objWord.Quit() 
