@@ -1,0 +1,55 @@
+#script de calcul du CPU en % 
+#et affectation d'une affinitée à 1 cpu/all pour les processus > 95 %
+#
+#La technique consiste à faire deux mesures et calculer la moyenne de temps occupée par le CPU. La formule est la suivante :
+#MoyCpu = [TempsTotalCPU (processus, time2) - TempsTotalCPU (processus, time1)] / [time2-time1] 
+#
+#le 03/10/2019 par GMC
+#le 04/10/2019 gmc >> ajout Invoke-command pour contrôle sur $serveur distant
+#
+#
+#
+$date = Get-Date 
+#
+#serveur cible
+Write-Host "saisir le nom du Serveur ou Ordinateur"
+$server =  read-Host
+
+
+Invoke-Command -ComputerName $server -ScriptBlock {
+
+# Take a snapshot of running processes
+$ProcBefore=Get-Process
+
+#sleep for some specified number of seconds
+Write-Host "Sleeping..."
+sleep -Seconds 1
+
+# Take an "after" snapshot of running processes
+$procAfter=Get-Process
+
+
+foreach ($p in $ProcBefore) {
+
+ $procAfter | where {$_.id -eq $p.id} -OutVariable z | Out-Null
+ 
+ if (($z[0].workingset)-($p.workingset) -gt 0 ) 
+ 
+ {
+
+ $usage="{0:P2}" -f (1-(($p.workingset)/($z[0].workingset)))
+
+ $usage_correction = $usage -replace '%',''
+
+ $usageINT = [int]$usage_correction
+
+
+#modifier la valuer [int] pour le seuil haut du filtre
+
+ if ($usageINT -gt [int]95) 
+ 
+ {write-host $p.id + $p.ProcessName + $usageINT
+ 
+ (Get-Process -id $p.id).ProcessorAffinity=1 
+ 
+  }}}}
