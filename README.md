@@ -1,1 +1,0 @@
-# Script write with powershell
